@@ -167,11 +167,11 @@
 
   const HOW = {
     cup: ['Hold your phone flat in your palm, screen up, like the cup is sitting on it.',
-      'When the pill turns green, flick your wrist up, like flicking the cup off the table edge.',
+      'When the pill turns green, pop the bottom edge of your phone up (slap it or flick your wrist) so the cup flips away from you onto the table.',
       'Soft flick = it won\'t turn over. Too hard = it over-rotates. Find the green zone on the meter.',
       'Flip all 6 cups as fast as you can.'],
     bottle: ['Hold your phone flat, screen up, like a pan with a pancake on it.',
-      'When it turns green, toss with a quick wrist flip, same motion as flipping a pancake.',
+      'When it turns green, pop the bottom edge up like flipping a pancake. The bottle flips away from you toward the table.',
       'The bottle has to do a full flip and land on its base. The water slows its spin, so commit to it.',
       'Land on the cap for a legendary flip.'],
   };
@@ -203,7 +203,7 @@
     S.flat = flat;
     if (S.phase === 'idle' && !S.armed && S.flat && now - S.flatSince > 350) { S.armed = true; Sfx.arm(); }
     if (!r) return;
-    const rate = Math.hypot(r.beta || 0, r.gamma || 0);           // deg/s, pitch + roll
+    const rate = Math.hypot(r.beta || 0, (r.gamma || 0) * 0.6);   // deg/s: pitch (bottom-edge slap) counts most
     const lin = e.acceleration ? Math.abs(e.acceleration.z || 0) : 0;
     if (S.capture) {
       S.capture.peak = Math.max(S.capture.peak, rate);
@@ -303,12 +303,13 @@
     const cols = ['#ffcf5a', '#e3262f', '#ffffff', '#5ad1ff', '#7dff9c'];
     for (let i = 0; i < n; i++) {
       const a = Math.random() * Math.PI, sp = 0.6 + Math.random() * 1.6;
-      S.particles.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp + 0.6, life: 1, c: cols[i % cols.length], r: Math.random() * TAU });
+      S.particles.push({ x, y, z: 0, vx: (Math.random() - 0.5) * 0.8, vz: Math.cos(a) * sp * 0.5, vy: Math.sin(a) * sp + 0.6, life: 1, c: cols[i % cols.length], r: Math.random() * TAU });
     }
   }
 
-  // ---------- render ----------
-  let W = 0, H = 0, DPR = 1, SC = 1, OX = 0, OY = 0;
+  // ---------- render (3/4 view from behind the player: forward = up the screen) ----------
+  let W = 0, H = 0, DPR = 1, SC = 1, CX = 0, BY = 0, V0 = 0, D0 = 0;
+  const PHI = 52 * Math.PI / 180, SP = Math.sin(PHI), CP = Math.cos(PHI), FOC = 1.6;
   function resize() {
     DPR = Math.min(window.devicePixelRatio || 1, 2.5);
     W = innerWidth; H = innerHeight;
@@ -317,164 +318,179 @@
   }
   addEventListener('resize', resize); resize();
   function camera() {
-    if (S.mode === 'bottle') {
-      SC = Math.min(W / 0.78, H / 1.05); OX = W * 0.5 - 0.22 * SC; OY = H * 0.68;
-    } else {
-      SC = Math.min(W / 0.66, H / 0.75); OX = W * 0.5 - 0.27 * SC; OY = H * 0.62;
-    }
+    // v = screen-up distance of a world point, d = depth from the camera
+    const span = S.mode === 'bottle' ? 0.74 : 0.56;
+    V0 = S.mode === 'bottle' ? 0.02 : -0.06;
+    D0 = 0;
+    SC = Math.min((H * 0.78) / span, W / 0.46);
+    CX = W / 2; BY = H * 0.88;
   }
-  const sx = (x) => OX + x * SC, sy = (y) => OY - y * SC;
+  // project world (x fwd, y up, z right) -> [screenX, screenY, scale]
+  function P(x, y, z = 0) {
+    const v = x * SP + y * CP, d = x * CP - y * SP;
+    const k = FOC / (FOC + d - D0);
+    return [CX + z * SC * k, BY - (v - V0) * SC * k, SC * k];
+  }
 
   function drawBackdrop() {
     const g = ctx.createLinearGradient(0, 0, 0, H);
     g.addColorStop(0, '#2b1c14'); g.addColorStop(0.55, '#3d281c'); g.addColorStop(1, '#1d120c');
     ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-    // string lights
     ctx.save();
-    const ly = H * 0.16;
+    const ly = H * 0.11;
     ctx.strokeStyle = 'rgba(0,0,0,.45)'; ctx.lineWidth = 1.5; ctx.beginPath();
-    for (let x = -20; x <= W + 20; x += 8) ctx.lineTo(x, ly + Math.sin(x / W * Math.PI * 3) * 14);
+    for (let x = -20; x <= W + 20; x += 8) ctx.lineTo(x, ly + Math.sin(x / W * Math.PI * 3) * 12);
     ctx.stroke();
     const t = performance.now() / 1000;
     for (let i = 0; i < 9; i++) {
-      const x = (i + 0.5) * W / 9, y = ly + Math.sin(x / W * Math.PI * 3) * 14 + 7;
+      const x = (i + 0.5) * W / 9, y = ly + Math.sin(x / W * Math.PI * 3) * 12 + 7;
       const tw = 0.75 + 0.25 * Math.sin(t * 2 + i * 1.7);
       const c = ['#ffcf5a', '#ff7a59', '#7dd3ff'][i % 3];
-      const rg = ctx.createRadialGradient(x, y, 0, x, y, 26);
+      const rg = ctx.createRadialGradient(x, y, 0, x, y, 24);
       rg.addColorStop(0, c); rg.addColorStop(0.25, c + '88'); rg.addColorStop(1, 'transparent');
-      ctx.globalAlpha = tw; ctx.fillStyle = rg; ctx.beginPath(); ctx.arc(x, y, 26, 0, TAU); ctx.fill();
+      ctx.globalAlpha = tw; ctx.fillStyle = rg; ctx.beginPath(); ctx.arc(x, y, 24, 0, TAU); ctx.fill();
     }
     ctx.restore();
   }
+  function poly(pts) { ctx.beginPath(); pts.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); ctx.closePath(); }
   function drawTable(x0, x1) {
-    const top = sy(0), th = 0.035 * SC;
-    // top
-    const g = ctx.createLinearGradient(0, top - 2, 0, top + th);
-    g.addColorStop(0, '#c98a4f'); g.addColorStop(0.3, '#a8693a'); g.addColorStop(1, '#6b3e1f');
-    ctx.fillStyle = g;
-    ctx.beginPath(); ctx.roundRect ? ctx.roundRect(sx(x0), top, sx(x1) - sx(x0), th, [6, 6, 0, 0]) : ctx.rect(sx(x0), top, sx(x1) - sx(x0), th); ctx.fill();
-    ctx.fillStyle = 'rgba(255,230,190,.35)'; ctx.fillRect(sx(x0) + 3, top, sx(x1) - sx(x0) - 6, 2);
-    // front face fading down
-    const g2 = ctx.createLinearGradient(0, top + th, 0, H);
-    g2.addColorStop(0, '#5a321a'); g2.addColorStop(1, '#2a160b');
-    ctx.fillStyle = g2; ctx.fillRect(sx(x0) + 0.02 * SC, top + th, sx(x1) - sx(x0) - 0.02 * SC, H);
-    // wood grain lines
-    ctx.strokeStyle = 'rgba(0,0,0,.12)'; ctx.lineWidth = 1;
-    for (let i = 0; i < 6; i++) {
-      const y = top + th + 14 + i * 22; ctx.beginPath(); ctx.moveTo(sx(x0) + 0.03 * SC, y); ctx.bezierCurveTo(W * 0.4, y + 6, W * 0.7, y - 6, sx(x1), y + 2); ctx.stroke();
+    const zw = 0.42;
+    const a = P(x0, 0, -zw), b = P(x0, 0, zw), c = P(x1, 0, zw), d = P(x1, 0, -zw);
+    // front face (near edge, facing the player)
+    const fa = P(x0, -0.5, -zw), fb = P(x0, -0.5, zw);
+    const gf = ctx.createLinearGradient(0, a[1], 0, fa[1]);
+    gf.addColorStop(0, '#6b3e1f'); gf.addColorStop(1, '#24120a');
+    ctx.fillStyle = gf; poly([a, b, fb, fa]); ctx.fill();
+    // top surface
+    const gt = ctx.createLinearGradient(0, d[1], 0, a[1]);
+    gt.addColorStop(0, '#7a4a26'); gt.addColorStop(1, '#c48a52');
+    ctx.fillStyle = gt; poly([a, b, c, d]); ctx.fill();
+    // wood planks
+    ctx.strokeStyle = 'rgba(60,30,10,.28)'; ctx.lineWidth = 1;
+    for (let i = 1; i < 7; i++) {
+      const z = -zw + i * (2 * zw / 7), p1 = P(x0, 0, z), p2 = P(x1, 0, z);
+      ctx.beginPath(); ctx.moveTo(p1[0], p1[1]); ctx.lineTo(p2[0], p2[1]); ctx.stroke();
     }
+    // edge highlight
+    ctx.strokeStyle = 'rgba(255,225,180,.55)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
   }
-  function shadow(b) {
-    const h = Math.max(0, b.y);
-    const a = clamp(0.35 - h * 0.6, 0.06, 0.35), r = (0.05 + h * 0.08) * SC;
-    if (S.mode === 'bottle' && b.x < TABLE_LEFT_BOTTLE) return;
-    ctx.fillStyle = `rgba(0,0,0,${a})`;
-    ctx.beginPath(); ctx.ellipse(sx(b.x), sy(0) + 2, r, r * 0.18, 0, 0, TAU); ctx.fill();
+  function shadowAt(x, y) {
+    const h = Math.max(0, y);
+    if (S.mode === 'bottle' && x < TABLE_LEFT_BOTTLE) return;
+    const p = P(x, 0, 0), r = (0.045 + h * 0.06) * p[2];
+    ctx.fillStyle = `rgba(0,0,0,${clamp(0.38 - h * 0.6, 0.06, 0.38)})`;
+    ctx.beginPath(); ctx.ellipse(p[0], p[1], r, r * SP * 0.9, 0, 0, TAU); ctx.fill();
   }
-  function withBody(b, fn) {
-    const k = b.k || 1;
-    ctx.save(); ctx.translate(sx(b.x), sy(b.y)); ctx.scale(SC * k, -SC * k); ctx.rotate(b.th); fn(); ctx.restore();
+  // A solid of revolution along the body's axis, drawn as stacked frustum segments.
+  // segs: [{a, b, ra, rb, side, end}] with a<b along local axis (m), radii in m.
+  function drawSolid(b, segs, glow) {
+    const c = Math.cos(b.th), s = Math.sin(b.th);
+    const ax = -s, ay = c;                 // axis direction (world x,y)
+    const facing = Math.sin(b.th + PHI);   // >0: the +axis end faces the camera
+    const tilt = Math.abs(facing);
+    const pt = (t) => P(b.x + ax * t, b.y + ay * t, 0);
+    const order = facing > 0 ? segs : segs.slice().reverse();
+    if (glow) { ctx.save(); ctx.shadowColor = 'rgba(125,255,156,.95)'; ctx.shadowBlur = 20 * DPR; }
+    for (const g of order) {
+      const pa = pt(g.a), pb = pt(g.b);
+      const ra = g.ra * pa[2], rb = g.rb * pb[2];
+      const ea = ra * tilt, eb = rb * tilt;
+      const grad = ctx.createLinearGradient(pa[0] - ra, 0, pa[0] + ra, 0);
+      grad.addColorStop(0, g.dark); grad.addColorStop(0.42, g.side); grad.addColorStop(0.6, g.lite || g.side); grad.addColorStop(1, g.dark);
+      ctx.fillStyle = grad;
+      ctx.beginPath(); ctx.ellipse(pa[0], pa[1], ra, Math.max(0.5, ea), 0, 0, TAU); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(pb[0], pb[1], rb, Math.max(0.5, eb), 0, 0, TAU); ctx.fill();
+      poly([[pa[0] - ra, pa[1]], [pa[0] + ra, pa[1]], [pb[0] + rb, pb[1]], [pb[0] - rb, pb[1]]]); ctx.fill();
+    }
+    if (glow) ctx.restore();
+    // visible end cap
+    const g = facing > 0 ? segs[segs.length - 1] : segs[0];
+    const t = facing > 0 ? g.b : g.a, r = facing > 0 ? g.rb : g.ra;
+    const p = pt(t), rr = r * p[2];
+    return { p, rr, er: rr * tilt, top: facing > 0 };
   }
   function drawCup(b, glow) {
-    withBody(b, () => {
-      const h = CUP.H / 2, bw = CUP.bw / 2, rw = CUP.rw / 2;
-      if (glow) { ctx.shadowColor = 'rgba(125,255,156,.9)'; ctx.shadowBlur = 18 * DPR; }
-      const g = ctx.createLinearGradient(-rw, 0, rw, 0);
-      g.addColorStop(0, '#a3121a'); g.addColorStop(0.35, '#ef3a41'); g.addColorStop(0.55, '#ff6066'); g.addColorStop(1, '#9c1118');
-      ctx.fillStyle = g;
-      ctx.beginPath(); ctx.moveTo(-bw, -h); ctx.lineTo(bw, -h); ctx.lineTo(rw, h); ctx.lineTo(-rw, h); ctx.closePath(); ctx.fill();
-      ctx.shadowBlur = 0;
-      // ridges
-      ctx.strokeStyle = 'rgba(255,255,255,.18)'; ctx.lineWidth = 0.0025;
-      for (const f of [-0.45, -0.1, 0.25]) {
-        const y = f * h, w = bw + (rw - bw) * ((y + h) / (2 * h));
-        ctx.beginPath(); ctx.moveTo(-w, y); ctx.lineTo(w, y); ctx.stroke();
-      }
-      // white rim band
-      ctx.fillStyle = '#f7f3ee';
-      ctx.beginPath(); ctx.moveTo(-rw * 0.97, h * 0.78); ctx.lineTo(rw * 0.97, h * 0.78); ctx.lineTo(rw * 1.04, h); ctx.lineTo(-rw * 1.04, h); ctx.closePath(); ctx.fill();
-      // base
-      ctx.fillStyle = '#7d0d13'; ctx.fillRect(-bw, -h, bw * 2, 0.004);
-    });
-  }
-  function bottlePath(h, w) {
-    ctx.beginPath();
-    ctx.moveTo(-w, -h + 0.008);
-    ctx.quadraticCurveTo(-w, -h, -w + 0.008, -h);
-    ctx.lineTo(w - 0.008, -h); ctx.quadraticCurveTo(w, -h, w, -h + 0.008);
-    ctx.lineTo(w, h * 0.45);
-    ctx.bezierCurveTo(w, h * 0.72, w * 0.42, h * 0.7, w * 0.42, h * 0.84);
-    ctx.lineTo(w * 0.42, h * 0.9); ctx.lineTo(-w * 0.42, h * 0.9); ctx.lineTo(-w * 0.42, h * 0.84);
-    ctx.bezierCurveTo(-w * 0.42, h * 0.7, -w, h * 0.72, -w, h * 0.45);
-    ctx.closePath();
+    const h = CUP.H / 2, rb = CUP.bw / 2, rw = CUP.rw / 2, k = b.k || 1;
+    const R = (t) => rb + (rw - rb) * ((t + h) / (2 * h));
+    const red = { side: '#ef3a41', lite: '#ff6a70', dark: '#8e0f16' };
+    const white = { side: '#f7f3ee', lite: '#ffffff', dark: '#c9c2b8' };
+    const segs = [
+      { a: -h * k, b: h * 0.62 * k, ra: rb * k, rb: R(h * 0.62) * k, ...red },
+      { a: h * 0.62 * k, b: h * k, ra: R(h * 0.62) * k, rb: rw * k, ...white },
+    ];
+    const cap = drawSolid(b, segs, glow);
+    if (cap.top) {      // looking into the cup
+      ctx.fillStyle = '#f7f3ee'; ctx.beginPath(); ctx.ellipse(cap.p[0], cap.p[1], cap.rr, cap.er, 0, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#b8141c'; ctx.beginPath(); ctx.ellipse(cap.p[0], cap.p[1], cap.rr * 0.9, cap.er * 0.9, 0, 0, TAU); ctx.fill();
+      ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.beginPath(); ctx.ellipse(cap.p[0], cap.p[1] - cap.er * 0.25, cap.rr * 0.7, cap.er * 0.55, 0, 0, TAU); ctx.fill();
+    } else {            // looking at the bottom
+      ctx.fillStyle = '#a8121a'; ctx.beginPath(); ctx.ellipse(cap.p[0], cap.p[1], cap.rr, cap.er, 0, 0, TAU); ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,.2)'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.ellipse(cap.p[0], cap.p[1], cap.rr * 0.7, cap.er * 0.7, 0, 0, TAU); ctx.stroke();
+    }
   }
   function drawBottle(b, glow) {
-    withBody(b, () => {
-      const h = BOT.H / 2, w = BOT.W / 2;
-      if (glow) { ctx.shadowColor = 'rgba(125,255,156,.9)'; ctx.shadowBlur = 18 * DPR; }
-      bottlePath(h, w);
-      ctx.fillStyle = 'rgba(200,235,255,.22)'; ctx.fill();
-      ctx.shadowBlur = 0;
-      // water: clip to bottle, draw a level surface in world orientation
-      ctx.save(); bottlePath(h, w); ctx.clip();
-      ctx.rotate(-b.th);
-      const c = Math.abs(Math.cos(b.th)), s = Math.abs(Math.sin(b.th));
-      const level = -(0.16 * BOT.H * c + 0.12 * BOT.W * s + 0.02 * (1 - c));
-      ctx.rotate(clamp(S.slosh, -0.6, 0.6));
-      const wg = ctx.createLinearGradient(0, level, 0, level - 0.2);
-      wg.addColorStop(0, 'rgba(90,190,255,.85)'); wg.addColorStop(1, 'rgba(30,110,220,.9)');
-      ctx.fillStyle = wg; ctx.fillRect(-0.3, level - 0.4, 0.6, 0.4);
-      ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.fillRect(-0.3, level - 0.003, 0.6, 0.004);
-      ctx.restore();
-      // label
-      ctx.fillStyle = '#1f6fd1'; ctx.fillRect(-w, -h * 0.25, w * 2, h * 0.42);
-      ctx.fillStyle = '#ffffff'; ctx.fillRect(-w, -h * 0.03, w * 2, h * 0.05);
-      // outline + shine
-      bottlePath(h, w); ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = 0.0022; ctx.stroke();
-      ctx.fillStyle = 'rgba(255,255,255,.35)'; ctx.fillRect(-w * 0.72, -h * 0.85, w * 0.16, h * 1.2);
-      // cap
-      ctx.fillStyle = '#1b56b8';
-      ctx.fillRect(-w * 0.5, h * 0.9, w, h * 0.1);
-      ctx.fillStyle = 'rgba(255,255,255,.25)'; ctx.fillRect(-w * 0.5, h * 0.95, w, h * 0.012);
-    });
+    const h = BOT.H / 2, w = BOT.W / 2;
+    const clear = { side: 'rgba(205,235,255,.55)', lite: 'rgba(255,255,255,.75)', dark: 'rgba(120,170,210,.6)' };
+    const water = { side: '#3d9df0', lite: '#7cc4ff', dark: '#1a5fb0' };
+    const label = { side: '#1f6fd1', lite: '#3d8be6', dark: '#123f82' };
+    const capc = { side: '#1b56b8', lite: '#3a78db', dark: '#0f306b' };
+    const segs = [
+      { a: -h, b: -h * 0.3, ra: w, rb: w, ...water },
+      { a: -h * 0.3, b: h * 0.15, ra: w, rb: w, ...label },
+      { a: h * 0.15, b: h * 0.45, ra: w, rb: w, ...clear },
+      { a: h * 0.45, b: h * 0.84, ra: w, rb: w * 0.42, ...clear },
+      { a: h * 0.84, b: h * 0.9, ra: w * 0.42, rb: w * 0.42, ...clear },
+      { a: h * 0.9, b: h, ra: w * 0.5, rb: w * 0.5, ...capc },
+    ];
+    const cap = drawSolid(b, segs, glow);
+    ctx.fillStyle = cap.top ? '#2a6ad0' : '#2f86e0';
+    ctx.beginPath(); ctx.ellipse(cap.p[0], cap.p[1], cap.rr, cap.er, 0, 0, TAU); ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,.3)'; ctx.lineWidth = 1.2; ctx.stroke();
   }
   function drawHand() {
-    // flat open palm, side view, at the left
-    const y = sy(PALM_Y), x = sx(0);
-    const L = 0.2 * SC, T = 0.03 * SC;
-    ctx.save();
-    // forearm
-    ctx.fillStyle = '#b97b52';
-    ctx.beginPath(); ctx.moveTo(x - L * 0.55, y + T * 0.2); ctx.lineTo(x - L * 1.8, y + T * 3.8); ctx.lineTo(x - L * 1.8, y + T * 6.5); ctx.lineTo(x - L * 0.5, y + T * 1.6); ctx.closePath(); ctx.fill();
+    const y = PALM_Y - 0.012;
+    // forearm coming from the bottom of the screen
+    const a1 = P(-0.6, y - 0.04, -0.045), a2 = P(-0.6, y - 0.04, 0.045), a3 = P(-0.07, y, 0.04), a4 = P(-0.07, y, -0.04);
+    ctx.fillStyle = '#b97b52'; poly([a1, a2, a3, a4]); ctx.fill();
     // palm
-    const g = ctx.createLinearGradient(0, y, 0, y + T * 1.6);
-    g.addColorStop(0, '#e2a679'); g.addColorStop(1, '#b97b52');
+    const c = P(0, y, 0);
+    const g = ctx.createRadialGradient(c[0], c[1], 2, c[0], c[1], 0.09 * c[2]);
+    g.addColorStop(0, '#f0b98c'); g.addColorStop(1, '#c98a5e');
     ctx.fillStyle = g;
-    ctx.beginPath();
-    ctx.moveTo(x - L * 0.6, y);
-    ctx.lineTo(x + L * 0.42, y);
-    ctx.quadraticCurveTo(x + L * 0.62, y + T * 0.15, x + L * 0.5, y + T * 0.7);
-    ctx.lineTo(x - L * 0.55, y + T * 1.6);
-    ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(c[0], c[1], 0.055 * c[2], 0.075 * c[2] * SP, 0, 0, TAU); ctx.fill();
+    // fingers pointing forward
+    ctx.strokeStyle = '#d99c70'; ctx.lineCap = 'round';
+    for (let i = 0; i < 4; i++) {
+      const z = -0.033 + i * 0.022, f0 = P(0.04, y, z), f1 = P(0.1 - Math.abs(i - 1.5) * 0.012, y, z * 1.1);
+      ctx.lineWidth = 0.018 * f0[2]; ctx.beginPath(); ctx.moveTo(f0[0], f0[1]); ctx.lineTo(f1[0], f1[1]); ctx.stroke();
+    }
     // thumb
-    ctx.fillStyle = '#d49568';
-    ctx.beginPath(); ctx.ellipse(x - L * 0.12, y - T * 0.15, L * 0.16, T * 0.32, -0.15, 0, TAU); ctx.fill();
-    ctx.restore();
+    const t0 = P(-0.01, y, -0.05), t1 = P(0.04, y + 0.004, -0.075);
+    ctx.lineWidth = 0.02 * t0[2]; ctx.beginPath(); ctx.moveTo(t0[0], t0[1]); ctx.lineTo(t1[0], t1[1]); ctx.stroke();
   }
   function drawDoneCups() {
-    // completed cups lined up (rim-down) further down the table
+    // finished cups line up across the far end of the table (rim-down); empty slots are faint rings
+    const k = 0.8, X = 0.46;
     for (let i = 0; i < CUPS_PER_ROUND; i++) {
-      const done = i < S.cupsDone;
-      const x = 0.31 + i * 0.056, k = 0.62;
-      ctx.globalAlpha = done ? 1 : 0.18;
-      drawCup({ x, y: CUP.H / 2 * k, th: Math.PI, k }, false);
+      const z = -0.175 + i * 0.07;
+      const p = P(X, 0, z);
+      if (i >= S.cupsDone) {
+        ctx.strokeStyle = 'rgba(255,235,200,.35)'; ctx.setLineDash([4, 4]); ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.ellipse(p[0], p[1], CUP.rw / 2 * k * p[2], CUP.rw / 2 * k * p[2] * SP * 0.9, 0, 0, TAU); ctx.stroke(); ctx.setLineDash([]);
+        continue;
+      }
+      const saveCX = CX; CX = saveCX + (p[0] - P(X, 0, 0)[0]);
+      drawCup({ x: X, y: CUP.H / 2 * k, th: Math.PI, k }, false);
+      CX = saveCX;
     }
-    ctx.globalAlpha = 1;
   }
   function drawParticles(dt) {
     for (const p of S.particles) {
-      p.vy -= 3.2 * dt; p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt * 0.8; p.r += dt * 8;
-      ctx.save(); ctx.globalAlpha = clamp(p.life, 0, 1); ctx.translate(sx(p.x), sy(p.y)); ctx.rotate(p.r);
+      p.vy -= 3.2 * dt; p.x += p.vx * 0.6 * dt; p.y += p.vy * dt; p.z += p.vz * dt; p.life -= dt * 0.8; p.r += dt * 8;
+      const s = P(p.x, p.y, p.z);
+      ctx.save(); ctx.globalAlpha = clamp(p.life, 0, 1); ctx.translate(s[0], s[1]); ctx.rotate(p.r);
       ctx.fillStyle = p.c; ctx.fillRect(-4, -2, 8, 4); ctx.restore();
     }
     S.particles = S.particles.filter((p) => p.life > 0 && p.y > -0.5);
@@ -519,17 +535,17 @@
     ctx.save(); ctx.translate(shx, shy);
     const ready = S.phase === 'idle' && (S.armed || (S.fallback && !S.sensor));
     if (S.mode === 'cup') {
-      drawTable(0.02, 2);
+      drawTable(0.02, 1.6);
       drawDoneCups();
-      shadow(S.body);
+      shadowAt(S.body.x, S.body.y);
       drawCup(S.body, ready);
     } else {
-      drawTable(TABLE_LEFT_BOTTLE, 2);
-      // target marker
-      ctx.strokeStyle = 'rgba(255,207,90,.35)'; ctx.setLineDash([6, 6]); ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.ellipse(sx(0.43), sy(0) + 2, 0.08 * SC, 0.014 * SC, 0, 0, TAU); ctx.stroke(); ctx.setLineDash([]);
-      shadow(S.body);
+      drawTable(TABLE_LEFT_BOTTLE, 1.6);
+      const m = P(0.43, 0, 0);
+      ctx.strokeStyle = 'rgba(255,207,90,.45)'; ctx.setLineDash([6, 6]); ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.ellipse(m[0], m[1], 0.07 * m[2], 0.07 * m[2] * SP * 0.9, 0, 0, TAU); ctx.stroke(); ctx.setLineDash([]);
       drawHand();
+      shadowAt(S.body.x, S.body.y);
       drawBottle(S.body, ready);
     }
     drawParticles(dt);
